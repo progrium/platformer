@@ -15,11 +15,11 @@ const (
 )
 
 var (
-	world     ecs.World
-	renderer  *RenderSystem
-	replay    *ReplaySystem
-	lastTick  int64
-	resetTick int64
+	game   *Game
+	replay *ReplaySystem
+
+	lastTime  int64
+	resetTime int64
 )
 
 type Player struct {
@@ -29,34 +29,26 @@ type Player struct {
 	*Tile
 }
 
-func init() {
-	replay = &ReplaySystem{}
-	reset()
+type Game struct {
+	Tick  int64
+	World ecs.World
+
+	Render *RenderSystem
+	Input  *InputSystem
+	Actor  *ActorSystem
+	Player *PlayerSystem
+	Replay *ReplaySystem
+
+	Players []Player
 }
 
-func reset() {
-	log.Printf("Replays: %d\n", len(replay.replays))
-	resetTick = time.Now().UnixNano()
-	world = ecs.World{}
-
-	var players []Player
-	players = append(players, Player{
-		Actor: &Actor{
-			Pos: Vec2i{100, 300},
-		},
-		Intent: &Intent{},
-		Tile: &Tile{
-			GID:   50,
-			Layer: 0,
-		},
-	})
-
-	replay.input = players[0].Intent
-
-	renderer = &RenderSystem{}
+func NewGame() *Game {
+	world := ecs.World{}
+	renderer := &RenderSystem{}
 	input := &InputSystem{}
 	actor := &ActorSystem{}
 	player := &PlayerSystem{}
+
 	world.AddSystem(replay)
 	world.AddSystem(renderer)
 	world.AddSystem(&MapSystem{
@@ -66,41 +58,64 @@ func reset() {
 	world.AddSystem(actor)
 	world.AddSystem(player)
 
-	for _ = range replay.replays {
-		intent := &Intent{}
-		players = append(players, Player{
-			Actor: &Actor{
-				Pos: Vec2i{100, 300},
-			},
-			Intent: intent,
-			Tile: &Tile{
-				GID:   50,
-				Layer: 0,
-			},
-		})
-		replay.outputs = append(replay.outputs, intent)
+	return &Game{
+		World:  world,
+		Render: renderer,
+		Input:  input,
+		Actor:  actor,
+		Player: player,
+		Replay: replay,
 	}
+}
 
-	for _, p := range players {
-		renderer.Add(&p.BasicEntity, p.Tile)
-		input.Add(&p.BasicEntity, p.Intent)
-		actor.Add(&p.BasicEntity, p.Actor)
-		player.Add(&p.BasicEntity, p.Actor, p.Intent, p.Tile)
-	}
+func (g *Game) AddPlayer(p Player) {
+	log.Println("Player added")
+	g.Players = append(g.Players, p)
+	g.Render.Add(&p.BasicEntity, p.Tile)
+	g.Input.Add(&p.BasicEntity, p.Intent)
+	g.Actor.Add(&p.BasicEntity, p.Actor)
+	g.Player.Add(&p.BasicEntity, p.Actor, p.Intent, p.Tile)
+
+	// always for now
+	g.Replay.input = g.Players[0].Intent
+}
+
+func init() {
+	replay = &ReplaySystem{}
+	reset()
+}
+
+func reset() {
+	resetTime = time.Now().UnixNano()
+	game = NewGame()
+	game.Tick = 0
+	intent := &Intent{}
+	game.AddPlayer(Player{
+		Actor: &Actor{
+			Pos: Vec2i{100, 300},
+		},
+		Intent: intent,
+		Tile: &Tile{
+			GID:   50,
+			Layer: 0,
+		},
+	})
 
 }
 
 func main() {
-	lastTick = time.Now().UnixNano()
+	go ListenAndServe()
+	lastTime = time.Now().UnixNano()
 	if err := ebiten.Run(func(screen *ebiten.Image) error {
+		game.Tick++
+
 		tickTime := time.Now().UnixNano()
-		tickDelta := float32(tickTime-lastTick) / float32(time.Second)
-		lastTick = tickTime
+		tickDelta := float32(tickTime-lastTime) / float32(time.Second)
+		lastTime = tickTime
 
-		renderer.screen = screen
-		replay.frameTick = tickTime - resetTick
+		game.Render.screen = screen
 
-		world.Update(tickDelta)
+		game.World.Update(tickDelta)
 
 		return nil
 	}, screenWidth, screenHeight, 1, "Platformer"); err != nil {
